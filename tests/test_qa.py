@@ -1438,6 +1438,50 @@ class TestCheckboxAndSizeDisplay(unittest.TestCase):
         self.assertEqual(m.data(m.index(1, COL_SIZE), Qt.DisplayRole), "0 B")
 
 
+class TestUninstallerQuoting(unittest.TestCase):
+    """MSIX 卸载"假成功"修复回归：引号剥离、命令形状、卸载后回查。"""
+
+    def test_01_split_command_剥离包裹引号(self):
+        """shlex(posix=False) 会保留引号：不剥离则 -Command 被回显而非执行（bug 回归）。"""
+        from src.core.uninstaller import Uninstaller
+        args = Uninstaller.split_command(
+            'powershell -NoProfile -Command "Write-Output hello"'
+        )
+        self.assertEqual(args[-1], "Write-Output hello")
+
+    def test_02_split_command_引号exe路径首段(self):
+        """带引号的卸载器路径（第三方软件 UninstallString 常见形态）。"""
+        from src.core.uninstaller import Uninstaller
+        args = Uninstaller.split_command('"C:\\Program Files\\X\\uninst.exe" /S')
+        self.assertEqual(args[0], "C:\\Program Files\\X\\uninst.exe")
+        self.assertEqual(args[1], "/S")
+
+    def test_03_msix_命令按家族名过滤且带ErrorActionStop(self):
+        """商店应用自动更新后 PackageFullName 会变：必须按 FamilyName 过滤（版本无关），
+        并带 -ErrorAction Stop 使失败可被退出码捕获。"""
+        from src.core.uninstaller import Uninstaller
+        from src.core.models import InstalledSoftware, SoftwareSource
+        sw = InstalledSoftware(
+            id="msix:A.B_1.0.0.0_x64__hash",
+            name="A.B",
+            source=SoftwareSource.MSIX,
+            package_family_name="A.B_hash",
+        )
+        cmd = Uninstaller().build_command(sw, quiet=True)
+        self.assertIn("Where-Object PackageFamilyName -eq 'A.B_hash'", cmd)
+        self.assertIn("Remove-AppxPackage -ErrorAction Stop", cmd)
+        self.assertNotIn("-Package A.B_1.0.0.0_x64__hash", cmd)
+
+    def test_04_verify_msix_构造安全无副作用判定(self):
+        """_verify_msix_removed 对无包名对象返回验证失败，不抛异常。"""
+        from src.core.uninstaller import Uninstaller
+        from src.core.models import InstalledSoftware, SoftwareSource
+        sw = InstalledSoftware(id="msix:", name="  ", source=SoftwareSource.MSIX)
+        still, err = Uninstaller()._verify_msix_removed(sw)
+        self.assertIsNone(still)
+        self.assertTrue(err)
+
+
 # ==========================================================================
 # 结果收集与报告
 # ==========================================================================
