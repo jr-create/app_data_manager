@@ -13,7 +13,7 @@ import os
 import sys
 import traceback
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -75,17 +75,25 @@ def _install_excepthook(app: QApplication) -> None:
     sys.excepthook = handler
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """启动应用主循环。
+
+    Args:
+        argv: 命令行参数列表；为空时回退到 ``sys.argv``。
+            支持 ``--selftest``：仅初始化主窗口并展示，2 秒后自动退出，
+            用于打包产物（exe）的自动化冒烟验证，不影响正常 GUI 使用。
 
     Returns:
         进程退出码（0 表示正常退出）。
     """
+    argv = list(sys.argv if argv is None else argv)
+    selftest = "--selftest" in argv
+
     dirs = config_mod.get_app_dirs(create=True)
     logger = setup_logging(dirs["logs"])
     logger.info("应用启动：%s v%s（Python %s）", __app_name__, __version__, sys.version.split()[0])
 
-    app = _build_application(sys.argv)
+    app = _build_application(argv)
     _install_excepthook(app)
 
     cfg = config_mod.load_config()
@@ -103,9 +111,22 @@ def main() -> int:
     window.show()
     logger.info("主窗口已显示")
 
+    if selftest:
+        # 自测模式：不进入人工交互，2 秒后由定时器自动退出。
+        # 用于验证打包产物可正常初始化 GUI（PySide6 全部模块 / 扫描服务 import 均无误）。
+        # 冻结（PyInstaller --windowed）环境下 QApplication 析构可能阻塞解释器关闭，
+        # 故直接以退出码 0 终止进程，保证自测可干净退出。
+        logger.info("自测模式：主窗口初始化成功，2 秒后自动退出")
+        QTimer.singleShot(2000, app.quit)
+        app.exec()
+        logger.info("自测模式：已自动退出")
+        logger.info("SELFTEST_ABOUT_TO_EXIT")  # 诊断哨兵：确认即将强制退出
+        os._exit(0)
+
     code = app.exec()
     logger.info("应用退出，退出码 %d", code)
-    return int(code)
+    # 与自测模式一致：冻结环境下强制退出，避免 GUI 关闭后进程残留。
+    os._exit(int(code))
 
 
 if __name__ == "__main__":

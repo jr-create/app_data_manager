@@ -171,3 +171,29 @@ python tests/smoke_test.py --no-real
 脚本会验证：模块导入、路径黑名单、真实扫描（注册表+MSIX+归属+大小）、完整流水线、
 临时假数据的备份/删除/拦截、后台 Worker 信号链路、CSV/JSON 导出、GUI 启动与对话框构造，
 末尾输出 `IS_PASS: YES/NO`。**全过程只读取本机信息，绝不删除/卸载真实软件与真实用户数据。**
+
+---
+
+## 九、打包为独立 exe（Windows）
+
+项目已提供 PyInstaller 打包配置 `app_data_manager.spec`，可一键产出**单文件、无控制台窗口**的
+`app_data_manager.exe`，双击即可运行，无需在目标机器安装 Python 与依赖。
+
+```powershell
+# 1. 安装打包工具
+pip install pyinstaller
+
+# 2. 生成单文件 exe（输出到 dist/app_data_manager.exe，约 60~70 MB）
+pyinstaller app_data_manager.spec
+
+# 3. 校验打包产物：仅初始化主窗口，2 秒后自动退出（退出码 0 表示成功）
+dist\app_data_manager.exe --selftest
+```
+
+说明：
+- `spec` 中已通过 `collect_submodules('PySide6')` 补齐全部 Qt 子模块，并设为 `--windowed`
+  （`console=False`），运行时无黑色命令行窗口。
+- `--selftest` 是内置自测开关（见 `src/main.py`）：仅用于 CI / 无头环境验证 GUI 可正常初始化，
+  日常使用无需加此参数。
+- 打包产物目录 `dist/` 已在 `.gitignore` 中排除，不进入版本库；发布版本以 GitHub Release 的
+  `app_data_manager.exe` 资产提供下载。
