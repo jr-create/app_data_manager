@@ -1,0 +1,7 @@
+# 软件数据迁移助手 依赖声明
+#
+# 本项目遵循"最小依赖"原则：除 PySide6（GUI）外，其余能力全部使用 Python 标准库实现，
+# 包括：注册表读取(winreg)、进程调用(subprocess)、zip 打包(zipfile)、
+# 目录遍历(os.scandir)、相似度(difflib)、序列化(json/csv)、回收站与 UAC(ctypes)。
+# 明确不引入：send2trash / psutil / pywin32 / winshell / rarfile / py7zr。
+PySide6-Essentials==6.8.3
