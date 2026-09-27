@@ -57,20 +57,29 @@ def _build_application(argv: list[str]) -> QApplication:
     return app
 
 
-def _install_excepthook(app: QApplication) -> None:
-    """安装全局异常钩子：写日志 + 弹窗提示，避免静默崩溃。"""
+def _install_excepthook(app: QApplication, *, gui_alerts: bool = True) -> None:
+    """安装全局异常钩子：写日志 + （可选）弹窗提示，避免静默崩溃。
+
+    Args:
+        app: QApplication 实例（保留参数以备扩展）。
+        gui_alerts: 是否弹出 ``QMessageBox``。自测（无头 / --windowed）模式下
+            关闭弹窗，改为仅打印到 stderr，避免无人点击的模态框导致进程挂起。
+    """
 
     def handler(exc_type, exc_value, exc_tb) -> None:
-        text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        sys.__excepthook__(exc_type, exc_value, exc_tb)
         try:
-            QMessageBox.critical(
-                None,
-                "程序异常",
-                f"发生未捕获异常，程序可能不稳定：\n{exc_value}\n\n详细信息已写入运行日志。",
-            )
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
         except Exception:
             pass
+        if gui_alerts:
+            try:
+                QMessageBox.critical(
+                    None,
+                    "程序异常",
+                    f"发生未捕获异常，程序可能不稳定：\n{exc_value}\n\n详细信息已写入运行日志。",
+                )
+            except Exception:
+                pass
 
     sys.excepthook = handler
 
@@ -94,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("应用启动：%s v%s（Python %s）", __app_name__, __version__, sys.version.split()[0])
 
     app = _build_application(argv)
-    _install_excepthook(app)
+    _install_excepthook(app, gui_alerts=not selftest)
 
     cfg = config_mod.load_config()
     logger.info("配置已加载：数据根目录 %d 个，模糊阈值 %.2f", len(cfg.data_roots), cfg.fuzzy_threshold)
@@ -112,21 +121,38 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("主窗口已显示")
 
     if selftest:
-        # 自测模式：不进入人工交互，2 秒后由定时器自动退出。
+        # 自测模式：不进入人工交互，2.2 秒后由定时器退出事件循环。
         # 用于验证打包产物可正常初始化 GUI（PySide6 全部模块 / 扫描服务 import 均无误）。
-        # 冻结（PyInstaller --windowed）环境下 QApplication 析构可能阻塞解释器关闭，
-        # 故直接以退出码 0 终止进程，保证自测可干净退出。
-        logger.info("自测模式：主窗口初始化成功，2 秒后自动退出")
-        QTimer.singleShot(2000, app.quit)
-        app.exec()
-        logger.info("自测模式：已自动退出")
-        logger.info("SELFTEST_ABOUT_TO_EXIT")  # 诊断哨兵：确认即将强制退出
-        os._exit(0)
+        # 关键：不使用 os._exit 强制终止。冻结（PyInstaller --windowed）环境下，os._exit /
+        # ExitProcess 会跳过 QApplication 析构，导致 Qt 的 DLL_PROCESS_DETACH 死锁、
+        # 进程无法退出（实测表现为 --selftest 在调用退出后挂起）。这里让事件循环正常退出、
+        # main() 返回，并显式销毁 QApplication 回收 Qt 内部线程，由解释器关闭后干净退出。
+        logger.info("自测模式：主窗口初始化成功，2.2 秒后自动退出")
+
+        def _mark(name: str) -> None:
+            try:
+                with open(r"C:/Users/seer/AppData/Local/Temp/selftest_%s.txt" % name, "w") as _f:
+                    _f.write(name + "\n")
+            except Exception:
+                pass
+
+        def _on_quit() -> None:
+            _mark("quit_timer")
+            app.quit()
+
+        QTimer.singleShot(2200, _on_quit)
+        rc = app.exec()
+        _mark("exec_returned")
+        # 强制销毁 QApplication，触发 Qt 内部线程回收，避免冻结环境下 DLL_PROCESS_DETACH 死锁
+        del app
+        import gc
+        gc.collect()
+        return rc
 
     code = app.exec()
     logger.info("应用退出，退出码 %d", code)
-    # 与自测模式一致：冻结环境下强制退出，避免 GUI 关闭后进程残留。
-    os._exit(int(code))
+    # 与自测模式一致：正常返回，由解释器关闭时析构 QApplication，避免冻结环境下挂死。
+    return int(code)
 
 
 if __name__ == "__main__":

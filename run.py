@@ -27,6 +27,16 @@ MIN_PYTHON: tuple[int, int] = (3, 10)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+#: 冻结（PyInstaller --windowed）模式下，stdout/stderr 会被引导器重定向到管道；
+#: 若 Python 侧（日志 / 三方库）持续写入，引导器的复制线程可能阻塞，导致进程退出挂起。
+#: 窗口程序本就无控制台，这里在入口处将二者重定向到 nul，确保打包产物可干净退出。
+if getattr(sys, "frozen", False):
+    try:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    except OSError:
+        pass
+
 
 def check_python() -> None:
     """校验当前解释器版本是否满足最低要求。

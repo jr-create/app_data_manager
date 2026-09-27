@@ -174,26 +174,32 @@ python tests/smoke_test.py --no-real
 
 ---
 
-## 九、打包为独立 exe（Windows）
+## 九、打包为独立程序（Windows）
 
-项目已提供 PyInstaller 打包配置 `app_data_manager.spec`，可一键产出**单文件、无控制台窗口**的
-`app_data_manager.exe`，双击即可运行，无需在目标机器安装 Python 与依赖。
+项目已提供 PyInstaller 打包配置 `app_data_manager.spec`，产出**免安装、目标机器无需 Python**
+的绿色目录版程序（`--onedir` 模式）：
 
 ```powershell
 # 1. 安装打包工具
 pip install pyinstaller
 
-# 2. 生成单文件 exe（输出到 dist/app_data_manager.exe，约 60~70 MB）
+# 2. 生成目录版程序（输出到 dist/app_data_manager/，双击其中的 app_data_manager.exe 运行）
 pyinstaller app_data_manager.spec
 
-# 3. 校验打包产物：仅初始化主窗口，2 秒后自动退出（退出码 0 表示成功）
-dist\app_data_manager.exe --selftest
+# 3. 校验打包产物：仅初始化主窗口，2.2 秒后自动退出（退出码 0 表示成功）
+dist\app_data_manager\app_data_manager.exe --selftest
+
+# 4.（可选）打包为 zip 分发
+Compress-Archive -Path dist\app_data_manager -DestinationPath app_data_manager_win64.zip
 ```
 
 说明：
-- `spec` 中已通过 `collect_submodules('PySide6')` 补齐全部 Qt 子模块，并设为 `--windowed`
-  （`console=False`），运行时无黑色命令行窗口。
-- `--selftest` 是内置自测开关（见 `src/main.py`）：仅用于 CI / 无头环境验证 GUI 可正常初始化，
-  日常使用无需加此参数。
-- 打包产物目录 `dist/` 已在 `.gitignore` 中排除，不进入版本库；发布版本以 GitHub Release 的
-  `app_data_manager.exe` 资产提供下载。
+- 采用 **onedir（目录）模式**而非 onefile：onefile 模式下 PyInstaller 引导器在进程退出时
+  需要递归删除 `_MEI` 解包临时目录，一旦其中文件被占用（Qt DLL / 杀软句柄）会永久挂起、
+  进程无法退出（本项目实测踩坑）；目录版退出时无此清理步骤，干净可靠。
+- `spec` 中已通过 `collect_submodules('PySide6')` 补齐全部 Qt 子模块，`console=False`，
+  运行时无黑色命令行窗口。
+- `--selftest` 是内置自测开关（见 `src/main.py`）：仅用于 CI / 无头环境验证 GUI 可正常
+  初始化，日常使用无需加此参数。
+- `dist/`、`build/` 已在 `.gitignore` 中排除，不进入版本库；GitHub Release 以
+  `app_data_manager_v1.0.0_win64.zip` 资产提供下载，解压后双击 `app_data_manager.exe` 即可运行。
