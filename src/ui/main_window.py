@@ -327,6 +327,8 @@ class MainWindow(QMainWindow):
     def on_scan_ready(self, result: ScanResult) -> None:
         """渐进式首屏：先渲染无大小的结果。"""
         self.result = result
+        self.model.sizing_done = False  # 新一轮大小计算开始
+        self.detail.sizing_done = False
         self.refresh_model()
         self.update_status()
 
@@ -346,6 +348,8 @@ class MainWindow(QMainWindow):
     def on_scan_finished(self, result: ScanResult) -> None:
         """扫描完成。"""
         self.result = result
+        self.model.sizing_done = True  # 大小计算结束：-1 视为"路径不存在"，显示 "—"
+        self.detail.sizing_done = True
         self.refresh_model()
         self.update_status()
         self.progress_bar.setValue(100)

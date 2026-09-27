@@ -1375,6 +1375,69 @@ sys.exit(0)
                 pass
 
 
+class TestCheckboxAndSizeDisplay(unittest.TestCase):
+    """复选框 setData（PySide6 6.8 CheckState 枚举）与占用列显示诚实化回归。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _make_row(self, key, name, entries):
+        from src.ui.widgets import Row
+        from src.core.models import InstalledSoftware, SoftwareSource
+        return Row(key=key, name=name, publisher="", version="", entries=entries,
+                   software=InstalledSoftware(id=key, name=name, source=SoftwareSource.REGISTRY),
+                   is_orphan=False, path_count=len(entries), size=0)
+
+    def test_01_setData_接受CheckState枚举(self):
+        """用户点击复选框时 Qt 传入 Qt.CheckState 枚举，不得抛 TypeError（bug 回归）。"""
+        from PySide6.QtCore import Qt
+        from src.ui.widgets import SoftwareTableModel, COL_CHECK
+        m = SoftwareTableModel()
+        m.set_rows([self._make_row("t1", "A", [])])
+        idx = m.index(0, COL_CHECK)
+        self.assertTrue(m.setData(idx, Qt.CheckState.Checked, Qt.CheckStateRole))
+        self.assertTrue(m.rows()[0].checked)
+        self.assertTrue(m.setData(idx, Qt.CheckState.Unchecked, Qt.CheckStateRole))
+        self.assertFalse(m.rows()[0].checked)
+
+    def test_02_setData_兼容int传入(self):
+        """程序化调用可能传入 int（2=Checked / 0=Unchecked），同样可用。"""
+        from PySide6.QtCore import Qt
+        from src.ui.widgets import SoftwareTableModel, COL_CHECK
+        m = SoftwareTableModel()
+        m.set_rows([self._make_row("t1", "A", [])])
+        idx = m.index(0, COL_CHECK)
+        self.assertTrue(m.setData(idx, 2, Qt.CheckStateRole))
+        self.assertTrue(m.rows()[0].checked)
+        self.assertTrue(m.setData(idx, 0, Qt.CheckStateRole))
+        self.assertFalse(m.rows()[0].checked)
+
+    def test_03_占用列_无归属路径显示破折号(self):
+        """未归属任何数据路径的软件显示 '—'，不再误导性地显示 '0 B'。"""
+        from PySide6.QtCore import Qt
+        from src.ui.widgets import SoftwareTableModel, COL_SIZE
+        m = SoftwareTableModel()
+        m.set_rows([self._make_row("t1", "A", [])])
+        self.assertEqual(m.data(m.index(0, COL_SIZE), Qt.DisplayRole), "—")
+
+    def test_04_占用列_未算完与路径不存在状态区分(self):
+        """计算中显示"计算中…"；sizing_done 后 -1 视为路径不存在显示 '—'；真实 0B 保持 '0 B'。"""
+        from PySide6.QtCore import Qt
+        from src.ui.widgets import SoftwareTableModel, COL_SIZE
+        from src.core.models import DataPathEntry, EntryKind
+        pending = [DataPathEntry(path=r"C:\no\such\dir", kind=EntryKind.DIR, size=-1, file_count=-1)]
+        empty = [DataPathEntry(path=r"C:\empty", kind=EntryKind.DIR, size=0, file_count=0)]
+        m = SoftwareTableModel()
+        m.set_rows([self._make_row("t1", "A", pending), self._make_row("t2", "B", empty)])
+        self.assertEqual(m.data(m.index(0, COL_SIZE), Qt.DisplayRole), "计算中…")
+        self.assertEqual(m.data(m.index(1, COL_SIZE), Qt.DisplayRole), "0 B")
+        m.sizing_done = True
+        self.assertEqual(m.data(m.index(0, COL_SIZE), Qt.DisplayRole), "—")
+        self.assertEqual(m.data(m.index(1, COL_SIZE), Qt.DisplayRole), "0 B")
+
+
 # ==========================================================================
 # 结果收集与报告
 # ==========================================================================

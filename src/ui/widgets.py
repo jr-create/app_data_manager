@@ -193,6 +193,9 @@ class SoftwareTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._rows: list[Row] = []
         self._icons: IconProvider = IconProvider()
+        #: 大小计算是否已全部结束（扫描完成后置 True）。
+        #: 用于区分"计算中…"与"路径不存在 / 未归属"，避免永久显示"计算中…"。
+        self.sizing_done: bool = False
 
     # ---- 基础 ----
 
@@ -245,7 +248,14 @@ class SoftwareTableModel(QAbstractTableModel):
             if col == COL_VERSION:
                 return row.version
             if col == COL_SIZE:
-                return human_size(row.size) if row.size >= 0 else "计算中…"
+                # 占用列显示诚实化：
+                #   * 无归属路径（未识别软件）→ "—"，不再误导性地显示 "0 B"；
+                #   * 全部路径未算完 → "计算中…"；扫描结束后仍为 -1 说明路径不存在 → "—"。
+                if not row.entries:
+                    return "—"
+                if all(e.size < 0 for e in row.entries):
+                    return "—" if self.sizing_done else "计算中…"
+                return human_size(max(0, row.size))
             if col == COL_PATH_COUNT:
                 return str(row.path_count)
         if role == RAW_ROLE:
@@ -281,7 +291,15 @@ class SoftwareTableModel(QAbstractTableModel):
             return False
         if index.column() == COL_CHECK and role == Qt.CheckStateRole:
             row = self._rows[index.row()]
-            row.checked = (value == Qt.Checked or value == int(Qt.Checked))
+            # PySide6 6.8：value 为 Qt.CheckState 枚举（不能 int() 直接转换），
+            # 也兼容程序化调用传入 int 的情形。
+            if isinstance(value, Qt.CheckState):
+                row.checked = value == Qt.CheckState.Checked
+            else:
+                try:
+                    row.checked = int(value) == int(Qt.CheckState.Checked.value)
+                except (TypeError, ValueError):
+                    row.checked = bool(value)
             self.dataChanged.emit(index, index, [Qt.CheckStateRole])
             return True
         return False
@@ -543,6 +561,8 @@ class DetailPanel(QWidget):
         self._current_key: str = ""
         self._current_name: str = ""
         self._entries: list[DataPathEntry] = []
+        #: 大小计算是否已全部结束（与 SoftwareTableModel.sizing_done 同步）。
+        self.sizing_done: bool = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -666,8 +686,7 @@ class DetailPanel(QWidget):
                 group_item.addChild(self._entry_item(entry))
             group_item.setExpanded(True)
 
-    @staticmethod
-    def _entry_item(entry: DataPathEntry) -> QTreeWidgetItem:
+    def _entry_item(self, entry: DataPathEntry) -> QTreeWidgetItem:
         """构造单条路径的树节点。"""
         tags: list[str] = []
         if entry.is_blacklisted:
@@ -686,9 +705,10 @@ class DetailPanel(QWidget):
             path_text = f"{path_text} ｜ {entry.block_reason}"
 
         # 体积超过阈值时，在尺寸文本后追加醒目提示，并把该路径行标红。
-        # size == -1 表示"未计算"，不计为超大目录。
+        # size == -1 表示"未计算"：计算期间显示"计算中…"，扫描结束后视为路径不存在 → "—"。
         is_large = entry.size > LARGE_DIR_BYTES
-        size_text = human_size(entry.size)
+        pending_text = "—" if self.sizing_done else "计算中…"
+        size_text = human_size(entry.size) if entry.size >= 0 else pending_text
         if is_large:
             size_text = f"{size_text} ⚠超大(>2GiB)"
 
@@ -696,7 +716,7 @@ class DetailPanel(QWidget):
             level_text,
             path_text,
             size_text,
-            str(entry.file_count) if entry.file_count >= 0 else "计算中…",
+            str(entry.file_count) if entry.file_count >= 0 else pending_text,
             format_time(entry.mtime),
         ])
         item.setData(0, Qt.UserRole, entry.path)
